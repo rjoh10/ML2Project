@@ -1,7 +1,6 @@
 """
 SARIMA Demand Forecasting — Northeast
 DS 4420 Project | Rhea Johnson & Iba Baig
-
 """
 
 import os
@@ -26,19 +25,13 @@ OUTPUT_DIR  = "/Users/rheajohnson/Downloads/sarima_outputs"
 OUTPUT_CSV  = os.path.join(OUTPUT_DIR, "sarima_residuals.csv")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Date range — adjust as needed
-START_DATE  = "2021-01-01"
-END_DATE    = "2025-03-23"
-
+START_DATE  = "2025-01-01"
+END_DATE    = "2026-03-30"
 
 ORDER    = (1, 1, 1)
 SEASONAL = (1, 1, 1, 7)
 
-
 STORM_WINDOWS = [
-    ("2022-12-23", "2022-12-26"),
-    ("2023-01-28", "2023-01-30"),
-    ("2024-01-08", "2024-01-11"),
     ("2025-01-06", "2025-01-08"),
 ]
 
@@ -87,7 +80,6 @@ def fetch_eia_demand(api_key, start, end, subba="4008", page_size=5000):
 
 raw = fetch_eia_demand(EIA_API_KEY, START_DATE, END_DATE)
 
-
 raw["datetime"] = pd.to_datetime(raw["period"], format="%Y-%m-%d", errors="coerce")
 raw["value"]    = pd.to_numeric(raw["value"], errors="coerce")
 
@@ -117,7 +109,6 @@ axes[1].set_title("PACF — First-differenced Daily Demand (Northeast Mass 4008)
 plt.tight_layout()
 plt.savefig(os.path.join(OUTPUT_DIR, "acf_pacf.png"), dpi=150)
 plt.show()
-print("Saved: acf_pacf.png  ← use this to tune ORDER if needed")
 
 print(f"\nFitting SARIMA{ORDER}x{SEASONAL} ...")
 model  = SARIMAX(daily, exog=exog, order=ORDER, seasonal_order=SEASONAL,
@@ -135,33 +126,59 @@ out = pd.DataFrame({
     "storm":        exog.values,
 })
 out.to_csv(OUTPUT_CSV, index=False)
-print(f"\nResiduals saved → {OUTPUT_CSV}  (push to Git for Bayesian model)")
+print(f"\nResiduals saved → {OUTPUT_CSV}")
 
-# ── 8. PLOTS ─────────────────────────────────────────────────────────────────
+# 30 day forecast
+FORECAST_STEPS = 30
+exog_future = np.zeros(FORECAST_STEPS)
+forecast = result.get_forecast(steps=FORECAST_STEPS, exog=exog_future)
+forecast_mean = forecast.predicted_mean
+forecast_ci   = forecast.conf_int(alpha=0.05)
+forecast_index = pd.date_range(daily.index[-1] + pd.Timedelta(days=1), periods=FORECAST_STEPS, freq="D")
+forecast_mean.index = forecast_index
+forecast_ci.index   = forecast_index
+
+# plots
 def shade_winters(ax, index):
     for yr in range(index.year.min(), index.year.max() + 2):
         ax.axvspan(pd.Timestamp(f"{yr-1}-12-01"), pd.Timestamp(f"{yr}-02-28"),
                    alpha=0.07, color="steelblue", label="_nolegend_")
 
-# Plot 1: Actual vs Fitted
-fig, ax = plt.subplots(figsize=(14, 5))
-shade_winters(ax, daily.index)
-ax.plot(daily.index, daily.values,           color="black",     lw=0.8, label="Actual")
-ax.plot(daily.index, result.fittedvalues,    color="steelblue", lw=0.9, alpha=0.8, label="SARIMA Fitted")
+# plot 1: Actual vs fitted + 30-day Forecast with CI + residuals
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), sharex=False)
+
+shade_winters(ax1, daily.index)
+ax1.plot(daily.index, daily.values, color="steelblue", lw=0.9, label="Actual")
+ax1.plot(daily.index, result.fittedvalues, color="orange", lw=0.9, alpha=0.8, label="Fitted")
+ax1.plot(forecast_mean.index, forecast_mean.values, color="red", lw=1.2, label="30-day forecast")
+ax1.fill_between(forecast_ci.index,
+                 forecast_ci.iloc[:, 0],
+                 forecast_ci.iloc[:, 1],
+                 color="red", alpha=0.15, label="95% CI")
 for s, e in STORM_WINDOWS:
-    ax.axvspan(pd.Timestamp(s), pd.Timestamp(e), alpha=0.25, color="crimson")
-ax.set_title("Northeast Mass (4008) — Actual vs SARIMA Fitted Demand")
-ax.set_ylabel("Daily Demand (MWh)")
-ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
-ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
-plt.xticks(rotation=30)
-ax.legend()
-ax.set_facecolor("#fafafa")
+    ax1.axvspan(pd.Timestamp(s), pd.Timestamp(e), alpha=0.25, color="crimson")
+ax1.set_title("SARIMA Forecast — Northeast Mass (4008)")
+ax1.set_ylabel("Demand (MWh)")
+ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+plt.setp(ax1.xaxis.get_majorticklabels(), rotation=30)
+ax1.legend()
+ax1.set_facecolor("#fafafa")
+
+ax2.plot(residuals.index, residuals.values, color="mediumpurple", lw=0.8)
+ax2.axhline(0, color="black", lw=0.8, linestyle="--")
+ax2.set_title("Residuals — Northeast Mass (4008)")
+ax2.set_ylabel("Residual (MWh)")
+ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+plt.setp(ax2.xaxis.get_majorticklabels(), rotation=30)
+ax2.set_facecolor("#fafafa")
+
 plt.tight_layout()
-plt.savefig(os.path.join(OUTPUT_DIR, "actual_vs_fitted.png"), dpi=150)
+plt.savefig(os.path.join(OUTPUT_DIR, "forecast_and_residuals.png"), dpi=150)
 plt.show()
 
-# Plot 2: Residuals across seasons
+# plot 2: Residuals by season (storm vs normal)
 fig, ax = plt.subplots(figsize=(14, 4))
 shade_winters(ax, residuals.index)
 ax.axhline(0, color="gray", lw=0.8, linestyle="--")
@@ -174,14 +191,14 @@ ax.set_title("SARIMA Residuals Across Seasons — Northeast Mass (4008)\n"
              "(positive = demand exceeded forecast)")
 ax.set_ylabel("Residual (MWh)")
 ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
-ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
+ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
 plt.xticks(rotation=30)
 ax.set_facecolor("#fafafa")
 plt.tight_layout()
 plt.savefig(os.path.join(OUTPUT_DIR, "residuals_by_season.png"), dpi=150)
 plt.show()
 
-# Plot 3: Residual distribution — storm vs normal
+# plot 3: Residual distribution for storm vs normal
 fig, ax = plt.subplots(figsize=(8, 4))
 residuals[exog == 0].hist(ax=ax, bins=40, alpha=0.6, color="steelblue", label="Normal days")
 residuals[exog == 1].hist(ax=ax, bins=15, alpha=0.7, color="crimson",   label="Storm days")
