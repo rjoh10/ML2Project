@@ -53,7 +53,6 @@ cat("Rows after feature engineering:", nrow(df), "\n")
 cat("Hour distribution:\n")
 print(table(df$hour_of_day))
 
-
 # Train/Test Split
 TRAIN_END <- as.POSIXct("2025-11-30 23:59:59", tz = "UTC")
 
@@ -91,7 +90,6 @@ make_Xy <- function(data, cols_to_keep = NULL) {
   )
   
   if (is.null(cols_to_keep)) {
-    # Training set and use QR to find independent columns
     qr_decomp  <- qr(X)
     keep       <- qr_decomp$pivot[1:qr_decomp$rank]
     X_clean    <- X[, keep, drop = FALSE]
@@ -234,7 +232,6 @@ key_params <- intersect(
   kept_cols
 )
 
-
 for (nm in key_params) {
   ci <- quantile(w_post[, nm], c(0.025, 0.25, 0.50, 0.75, 0.975))
   cat(sprintf("  %-14s | mean=%8.4f | sd=%6.4f | 95%% CI: [%7.4f, %7.4f]\n",
@@ -322,7 +319,7 @@ for (hp in hist_params) {
     hist(chain, main=hp$title, xlab="Value",
          col="#aec7e8", border="white", breaks=40)
     abline(v=mean(chain), col="red",   lwd=2)
-    abline(v=0,           col="black", lwd=1, lty=2)
+    abline(v=0, col="black", lwd=1, lty=2)
   }
 }
 par(mfrow=c(1,1))
@@ -335,7 +332,6 @@ for (nm in key_params) {
               nm, mean(w_post[, nm]), ci[1], ci[2],
               ifelse(ci[1] > 0 | ci[2] < 0, "", "")))
 }
-
 
 # Posterior predictive Distribution
 cat("  (", n_post, "draws ×", nrow(test), "test hours)\n\n")
